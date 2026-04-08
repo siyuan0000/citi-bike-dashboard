@@ -10,3 +10,7 @@
 - [ ] Write integration API in `application.py` allowing the frontend to extract Spark-processed answers directly from the S3 bucket.
 - [ ] Update `history.html` template to render the data distributions dynamically from the `api/history-data` endpoint.
 - [ ] Set up Spark computation scripts representing the backend data transformation pipeline (to be submitted to EMR).
+
+completed the code part of spark and test on local
+todo: run spark on aws. it need to read history data .csv from s3 and save result to s3 (need test)
+todo: test api can read the result from s3
