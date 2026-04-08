@@ -1,5 +1,4 @@
-Flask==3.0.0
+# Core backend dependencies (pinned to current working environment)
+APScheduler==3.10.1
+Flask==2.3.2
 requests==2.31.0
-SQLAlchemy==2.0.21
-boto3==1.28.62
-gunicorn==21.2.0

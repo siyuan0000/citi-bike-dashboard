@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Station Real-time Data</title>
+    <!-- Use jQuery and Highcharts like the reference Lab06 code -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highcharts@11.4.0/highstock.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highcharts@11.4.0/modules/exporting.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            padding: 20px; 
+            background-color: #f4f7f6;
+        }
+        .container { 
+            max-width: 900px; 
+            margin: auto; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+        }
+        /* CSS for the warning alert when bikes drop to 0 */
+        #warning { 
+            display: none; 
+            background-color: #ffcccc; 
+            color: #cc0000; 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            font-weight: bold; 
+            border-left: 5px solid red;
+            border-radius: 4px;
+        }
+        .nav-btn {
+            display: inline-block; padding: 10px 15px; background: #555; color: white; text-decoration: none; border-radius: 4px; margin-bottom: 20px;
+        }
+        .nav-btn:hover { background: #333; }
+        #status-message {
+            margin-bottom: 14px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            background: #eef4ff;
+            color: #1b3a66;
+            font-size: 14px;
+        }
+        .status-card {
+            margin-top: 18px;
+            margin-bottom: 18px;
+            border: 1px solid #d8e1ec;
+            border-radius: 8px;
+            background: #f8fbff;
+            padding: 12px;
+        }
+        .status-title {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 8px 14px;
+            font-size: 14px;
+        }
+        .status-item {
+            background: #fff;
+            border: 1px solid #e3ebf5;
+            border-radius: 6px;
+            padding: 8px 10px;
+        }
+        .status-label {
+            color: #52627a;
+            font-size: 12px;
+            display: block;
+        }
+        .status-value {
+            font-weight: bold;
+            color: #22364f;
+        }
+        .debug-box {
+            margin-top: 24px;
+            border: 1px solid #d9e2ec;
+            border-radius: 8px;
+            padding: 14px;
+            background: #fbfdff;
+        }
+        .debug-title {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+        }
+        .debug-summary {
+            font-size: 14px;
+            color: #445;
+            margin-bottom: 10px;
+        }
+        .debug-empty {
+            padding: 10px;
+            border: 1px dashed #b6c3d1;
+            border-radius: 6px;
+            background: #f7faff;
+            color: #4b6079;
+            font-size: 14px;
+        }
+        .debug-table-wrap {
+            max-height: 300px;
+            overflow: auto;
+            border: 1px solid #d6dce5;
+            border-radius: 6px;
+            background: #fff;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            border-bottom: 1px solid #e8edf3;
+            text-align: left;
+            padding: 8px;
+        }
+        th {
+            position: sticky;
+            top: 0;
+            background: #f1f5fa;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="nav-btn">&larr; Back to Map</a>
+        
+        <h2>Real-time Monitoring: {{ station_name }}</h2>
+        <p style="margin-top: 0; color: #667;">Station ID: {{ station_id }}</p>
+        <p>This chart updates automatically every 30 seconds.</p>
+        <div id="status-message">Loading data from database...</div>
+
+        <!-- Warning Banner -->
+        <div id="warning">
+            ⚠️ WARNING: This station currently has NO available bikes! Please select another nearby station.
+        </div>
+        
+        <!-- The Highcharts Canvas -->
+        <div id="chart-container" style="min-width:400px; height:500px"></div>
+        <div id="chart-docks-container" style="min-width:400px; height:500px; margin-top: 20px;"></div>
+
+        <div class="status-card">
+            <h3 class="status-title">Station Status (Same fields as map marker)</h3>
+            <div class="status-grid">
+                <div class="status-item"><span class="status-label">lat</span><span class="status-value" id="status-lat">{{ station_lat if station_lat is not none else 'N/A' }}</span></div>
+                <div class="status-item"><span class="status-label">lon</span><span class="status-value" id="status-lon">{{ station_lon if station_lon is not none else 'N/A' }}</span></div>
+                <div class="status-item"><span class="status-label">capacity</span><span class="status-value" id="status-capacity">{{ station_capacity if station_capacity is not none else 'N/A' }}</span></div>
+                <div class="status-item"><span class="status-label">is_installed</span><span class="status-value" id="status-is-installed">N/A</span></div>
+                <div class="status-item"><span class="status-label">is_renting</span><span class="status-value" id="status-is-renting">N/A</span></div>
+                <div class="status-item"><span class="status-label">is_returning</span><span class="status-value" id="status-is-returning">N/A</span></div>
+                <div class="status-item"><span class="status-label">num_bikes_available</span><span class="status-value" id="status-bikes">N/A</span></div>
+                <div class="status-item"><span class="status-label">num_docks_available</span><span class="status-value" id="status-docks">N/A</span></div>
+                <div class="status-item"><span class="status-label">num_vehicles_disabled</span><span class="status-value" id="status-vehicles-disabled">N/A</span></div>
+                <div class="status-item"><span class="status-label">num_docks_disabled</span><span class="status-value" id="status-docks-disabled">N/A</span></div>
+                <div class="status-item"><span class="status-label">latest_db_update</span><span class="status-value" id="status-latest-time">N/A</span></div>
+            </div>
+        </div>
+
+        <div class="debug-box">
+            <h3 class="debug-title">Database Debug Rows</h3>
+            <div class="debug-summary" id="debug-summary">Total rows in DB for this station: {{ initial_debug_rows|length }}</div>
+            <div class="debug-empty" id="debug-empty" {% if initial_debug_rows|length > 0 %}style="display:none;"{% endif %}>No data in database for this station yet.</div>
+            <div class="debug-table-wrap" id="debug-table-wrap" {% if initial_debug_rows|length == 0 %}style="display:none;"{% endif %}>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Grab Time (Unix)</th>
+                            <th>Grab Time (Local)</th>
+                            <th>Bikes</th>
+                            <th>Available Docks (Parking Slots)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="debug-tbody">
+                        {% for row in initial_debug_rows %}
+                        <tr>
+                            <td>{{ row.id }}</td>
+                            <td>{{ row.grab_time }}</td>
+                            <td>{{ row.local_time }}</td>
+                            <td>{{ row.num_bikes_available }}</td>
+                            <td>{{ row.num_docks_available }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script type="text/javascript">
+        var stationId = "{{ station_id }}";
+        var initialLatestStatus = JSON.parse('{{ initial_latest_status|tojson|safe }}');
+        var lastTimeBikes = 0; // Unix timestamp
+        var lastTimeDocks = 0; // Unix timestamp
+        var pollTimer = null;
+
+        // Show timeline in browser local timezone (Hong Kong for your machine).
+        Highcharts.setOptions({
+            time: {
+                useUTC: false
+            }
+        });
+
+        function formatLocalTime(unixSeconds) {
+            var d = new Date(unixSeconds * 1000);
+            return d.toLocaleString();
+        }
+
+        function formatFlag(value) {
+            if (value === null || value === undefined) {
+                return 'N/A';
+            }
+            return value ? 'true' : 'false';
+        }
+
+        function formatValue(value) {
+            if (value === null || value === undefined) {
+                return 'N/A';
+            }
+            return value;
+        }
+
+        function setStatusValue(id, value) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+            }
+        }
+
+        function renderStatusCard(payload) {
+            if (!payload) {
+                return;
+            }
+
+            var lat = (payload.lat === null || payload.lat === undefined) ? 'N/A' : Number(payload.lat).toFixed(5);
+            var lon = (payload.lon === null || payload.lon === undefined) ? 'N/A' : Number(payload.lon).toFixed(5);
+
+            setStatusValue('status-lat', lat);
+            setStatusValue('status-lon', lon);
+            setStatusValue('status-capacity', formatValue(payload.capacity));
+            setStatusValue('status-is-installed', formatFlag(payload.is_installed));
+            setStatusValue('status-is-renting', formatFlag(payload.is_renting));
+            setStatusValue('status-is-returning', formatFlag(payload.is_returning));
+            setStatusValue('status-bikes', formatValue(payload.num_bikes_available));
+            setStatusValue('status-docks', formatValue(payload.num_docks_available));
+            setStatusValue('status-vehicles-disabled', formatValue(payload.num_vehicles_disabled));
+            setStatusValue('status-docks-disabled', formatValue(payload.num_docks_disabled));
+
+            if (payload.latest_grab_time) {
+                setStatusValue('status-latest-time', formatLocalTime(payload.latest_grab_time));
+            } else {
+                setStatusValue('status-latest-time', 'N/A');
+            }
+        }
+
+        function loadLatestStatus() {
+            $.getJSON('/api/station_latest/' + encodeURIComponent(stationId), function (payload) {
+                renderStatusCard(payload);
+            });
+        }
+
+        function updateStatusMessage(dataCount) {
+            if (dataCount === 0) {
+                $('#status-message').text('No data currently. Please wait for the next background fetch.');
+            } else if (dataCount === 1) {
+                $('#status-message').text('1 record found. The single point is centered on the chart.');
+            } else {
+                $('#status-message').text(dataCount + ' records found. Showing data from oldest to newest.');
+            }
+        }
+
+        function renderDebugTable(rows) {
+            $('#debug-summary').text('Total rows in DB for this station: ' + rows.length);
+
+            if (rows.length === 0) {
+                $('#debug-empty').show();
+                $('#debug-table-wrap').hide();
+                $('#debug-tbody').empty();
+                return;
+            }
+
+            $('#debug-empty').hide();
+            $('#debug-table-wrap').show();
+
+            var html = '';
+            rows.forEach(function (row) {
+                html += '<tr>' +
+                    '<td>' + row.id + '</td>' +
+                    '<td>' + row.grab_time + '</td>' +
+                    '<td>' + formatLocalTime(row.grab_time) + '</td>' +
+                    '<td>' + row.num_bikes_available + '</td>' +
+                    '<td>' + row.num_docks_available + '</td>' +
+                    '</tr>';
+            });
+            $('#debug-tbody').html(html);
+        }
+
+        function loadDebugRows() {
+            $.getJSON('/api/debug/' + encodeURIComponent(stationId), function (rows) {
+                renderDebugTable(rows);
+            });
+        }
+
+        function initStockChart(containerId, titleText, seriesName, data, color) {
+            $('#' + containerId).highcharts('StockChart', {
+                chart: {
+                    events: {
+                        load: function () {
+                            if (!pollTimer) {
+                                pollTimer = setInterval(pollIncrementalData, 30000);
+                            }
+                        }
+                    }
+                },
+                rangeSelector: { selected: 1 },
+                title: { text: titleText },
+                yAxis: {
+                    title: { text: 'Number' },
+                    min: 0
+                },
+                series: [{
+                    name: seriesName,
+                    data: data,
+                    tooltip: { valueDecimals: 0 },
+                    color: color,
+                    marker: {
+                        enabled: true,
+                        radius: 4
+                    }
+                }]
+            });
+
+            if (data.length === 1) {
+                var chart = $('#' + containerId).highcharts();
+                if (chart && chart.xAxis && chart.xAxis[0]) {
+                    var x = data[0][0];
+                    chart.xAxis[0].setExtremes(x - 60000, x + 60000);
+                }
+            }
+        }
+
+        function appendPoints(containerId, points) {
+            if (!points || points.length === 0) {
+                return;
+            }
+
+            var chart = $('#' + containerId).highcharts();
+            var series = chart ? chart.series[0] : null;
+            if (!series) {
+                return;
+            }
+
+            $.each(points, function (i, v) {
+                series.addPoint(v);
+            });
+        }
+
+        function pollIncrementalData() {
+            $.when(
+                $.getJSON('/api/data/' + encodeURIComponent(stationId) + '?last_time=' + lastTimeBikes),
+                $.getJSON('/api/data_docks/' + encodeURIComponent(stationId) + '?last_time=' + lastTimeDocks)
+            ).done(function (bikesResp, docksResp) {
+                var bikesRes = bikesResp[0];
+                var docksRes = docksResp[0];
+
+                if (bikesRes.length > 0) {
+                    appendPoints('chart-container', bikesRes);
+                    lastTimeBikes = bikesRes[bikesRes.length - 1][0] / 1000;
+                    checkWarning(bikesRes[bikesRes.length - 1][1]);
+                }
+
+                if (docksRes.length > 0) {
+                    appendPoints('chart-docks-container', docksRes);
+                    lastTimeDocks = docksRes[docksRes.length - 1][0] / 1000;
+                }
+
+                loadDebugRows();
+                loadLatestStatus();
+            });
+        }
+
+        $(function () {
+            renderStatusCard(initialLatestStatus);
+            loadLatestStatus();
+
+            $.when(
+                $.getJSON('/api/data/' + encodeURIComponent(stationId)),
+                $.getJSON('/api/data_docks/' + encodeURIComponent(stationId))
+            ).done(function (bikesResp, docksResp) {
+                var bikesData = bikesResp[0];
+                var docksData = docksResp[0];
+
+                updateStatusMessage(bikesData.length);
+                loadDebugRows();
+
+                if (bikesData.length === 0 && docksData.length === 0) {
+                    $('#chart-container').hide();
+                    $('#chart-docks-container').hide();
+                    $('#warning').hide();
+                } else {
+                    $('#chart-container').show();
+                    $('#chart-docks-container').show();
+
+                    if (bikesData.length > 0) {
+                        lastTimeBikes = bikesData[bikesData.length - 1][0] / 1000;
+                        checkWarning(bikesData[bikesData.length - 1][1]);
+                    }
+                    if (docksData.length > 0) {
+                        lastTimeDocks = docksData[docksData.length - 1][0] / 1000;
+                    }
+
+                    try {
+                        initStockChart('chart-container', 'Available Bikes Timeline', 'Bikes', bikesData, '#28a745');
+                        initStockChart('chart-docks-container', 'Available Docks Timeline', 'Docks', docksData, '#1f77d0');
+                    } catch (err) {
+                        console.error('Chart initialization failed:', err);
+                        $('#status-message').text('Chart failed to initialize: ' + (err && err.message ? err.message : 'Unknown error') + '. DB debug rows are shown below.');
+                    }
+                }
+
+            }).fail(function () {
+                $('#status-message').text('Failed to load time-series API. Please check backend logs.');
+                $('#chart-container').hide();
+                $('#chart-docks-container').hide();
+                loadDebugRows();
+            });
+        });
+
+        // Function checking if we hit custom conditions (like the requested overspeed warning)
+        function checkWarning(numBikes) {
+            if (numBikes === 0) {
+                $('#warning').slideDown('fast'); // Shows the warning
+            } else {
+                $('#warning').slideUp('fast');   // Hides the warning
+            }
+        }
+    </script>
+</body>
+</html>

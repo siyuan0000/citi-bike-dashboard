@@ -2,77 +2,94 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Citi Bike Real-Time Dashboard</title>
+    <title>Citi Bike Real-time Map</title>
+    <!-- Leaflet CSS for the map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; background-color: #0b3d91; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .nav a { color: white; text-decoration: none; margin-left: 15px; font-weight: bold; background-color: #1e62c9; padding: 10px; border-radius: 4px; }
-        .nav a:hover { background-color: #2779f5; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 4px solid #0b3d91; }
-        .card h3 { margin-top: 0; color: #0b3d91; font-size: 1.1em; }
-        .badge { display: inline-block; padding: 5px 10px; border-radius: 12px; font-size: 0.85em; font-weight: bold; color: white; }
-        .badge-available { background-color: #28a745; }
-        .badge-empty { background-color: #dc3545; }
-        .loading { font-size: 1.2em; text-align: center; margin-top: 50px; color: #666; }
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .header { 
+            position: absolute; 
+            top: 10px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 1000; 
+            background: white; 
+            padding: 10px 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            text-align: center;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Citi Bike Real-Time Status</h1>
-            <div class="nav">
-                <a href="/">Real-Time Data</a>
-                <a href="/history">History Analytics</a>
-            </div>
-        </header>
-        
-        <div id="loading" class="loading">Loading Live Data...</div>
-        <div id="stations-grid" class="grid"></div>
+    <div class="header">
+        <h3 style="margin-top: 5px; margin-bottom: 5px;">Citi Bike Real-time Monitor</h3>
+        <p style="margin-top: 0; font-size: 14px; margin-bottom: 5px;">Select a station on the map to view real-time data</p>
     </div>
+    
+    <div id="map"></div>
 
+    <!-- Leaflet Local JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        async function fetchStations() {
-            try {
-                const response = await fetch('/api/stations');
-                const result = await response.json();
-                
-                document.getElementById('loading').style.display = 'none';
-                
-                if (result.status === 'success') {
-                    const grid = document.getElementById('stations-grid');
-                    grid.innerHTML = ''; // Clear existing
-                    
-                    // Displaying the first 20 stations for demo purposes
-                    const stations = result.data.slice(0, 20);
-                    
-                    stations.forEach(station => {
-                        const card = document.createElement('div');
-                        card.className = 'card';
-                        
-                        const bikesAvailable = station.num_bikes_available;
-                        const badgeClass = bikesAvailable > 0 ? 'badge-available' : 'badge-empty';
-                        
-                        card.innerHTML = `
-                            <h3>${station.name}</h3>
-                            <p><strong>Capacity:</strong> ${station.capacity}</p>
-                            <p><strong>Bikes Available:</strong> <span class="badge ${badgeClass}">${bikesAvailable}</span></p>
-                            <p><strong>Docks Available:</strong> ${station.num_docks_available}</p>
-                        `;
-                        grid.appendChild(card);
-                    });
-                }
-            } catch (error) {
-                console.error("Error fetching station data:", error);
-                document.getElementById('loading').innerText = "Error loading data.";
-            }
+        // Initialize map centered roughly on Manhattan, NY
+        var map = L.map('map').setView([40.75, -73.98], 13);
+        
+        // Add OpenStreetMap tiles (Free, no API key required)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        function formatFlag(value) {
+            if (value === null || value === undefined) return "N/A";
+            return value ? "true" : "false";
         }
 
-        // Fetch immediately and poll every 30 seconds
-        fetchStations();
-        setInterval(fetchStations, 30000);
+        function formatCount(value) {
+            if (value === null || value === undefined) return "N/A";
+            return value;
+        }
+
+        function formatLocalTime(epochSeconds) {
+            if (!epochSeconds) return "N/A";
+            return new Date(epochSeconds * 1000).toLocaleString();
+        }
+
+        // Fetch selected stations and latest status from our Flask API
+        fetch('/api/stations')
+            .then(response => response.json())
+            .then(stations => {
+                stations.forEach(station => {
+                    // Place a marker on the map for each station
+                    var marker = L.marker([station.lat, station.lon]).addTo(map);
+                    
+                    // Create popup content with a link to the detail page
+                    var popupContent = `
+                        <div style="text-align: center;">
+                            <b>${station.name}</b><br>
+                            <span style="font-size: 12px; color: #555;">Lat: ${station.lat.toFixed(5)}, Lon: ${station.lon.toFixed(5)}</span><br>
+                            <span style="font-size: 13px;">Capacity: ${station.capacity} bikes</span><br><br>
+
+                            <span style="font-size: 12px;">is_installed: <b>${formatFlag(station.is_installed)}</b></span><br>
+                            <span style="font-size: 12px;">is_renting: <b>${formatFlag(station.is_renting)}</b></span><br>
+                            <span style="font-size: 12px;">is_returning: <b>${formatFlag(station.is_returning)}</b></span><br>
+                            <span style="font-size: 12px;">num_bikes_available: <b>${formatCount(station.num_bikes_available)}</b></span><br>
+                            <span style="font-size: 12px;">num_docks_available: <b>${formatCount(station.num_docks_available)}</b></span><br>
+                            <span style="font-size: 12px;">num_vehicles_disabled: <b>${formatCount(station.num_vehicles_disabled)}</b></span><br>
+                            <span style="font-size: 12px;">num_docks_disabled: <b>${formatCount(station.num_docks_disabled)}</b></span><br>
+                            <span style="font-size: 11px; color: #555;">Latest DB update: ${formatLocalTime(station.latest_grab_time)}</span><br><br>
+
+                            <a href="/station/${station.station_id}" target="_blank" style="display:inline-block; padding:6px 12px; background:#0066cc; color:white; text-decoration:none; border-radius:4px; font-weight:bold;">
+                                View Real-time Chart
+                            </a>
+                        </div>
+                    `;
+                    marker.bindPopup(popupContent);
+                });
+            })
+            .catch(error => console.error("Error loading stations:", error));
     </script>
 </body>
 </html>
