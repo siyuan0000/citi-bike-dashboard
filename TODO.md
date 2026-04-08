@@ -1,9 +1,9 @@
 # Project TODO List
 
 ## Lab 4: Website and DB (AWS Elastic Beanstalk & RDS)
-- [ ] Incorporate SQLAlchemy and establish connection logic to the AWS RDS database.
-- [ ] Create a periodic task or an endpoint to routinely save the current Citi Bike GBFS data into the RDS database.
-- [ ] Verify execution configuration inside Elastic Beanstalk (`.ebextensions` and environment variables).
+- [completed] Incorporate SQLAlchemy and establish connection logic to the AWS RDS database.
+- [completed] Create a periodic task or an endpoint to routinely save the current Citi Bike GBFS data into the RDS database.
+- [completed] Verify execution configuration inside Elastic Beanstalk (`.ebextensions` and environment variables).
 
 ## Lab 5: Spark Integration (S3 & EMR)
 - [ ] Configure `boto3` for integration with Amazon S3.
