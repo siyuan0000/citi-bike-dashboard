@@ -1,45 +1,62 @@
-import sqlite3
-from pathlib import Path
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import URL
+from sqlalchemy.orm import sessionmaker
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_NAME = str(BASE_DIR / "citibike.db")
+from config import settings
+from models import Base
 
-def get_db_connection():
-    # Connect to local SQLite database (easily convertible to AWS RDS later)
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
-def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Create Station table to store static information
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS Station (
-            station_id TEXT PRIMARY KEY,
-            name TEXT,
-            lat REAL,
-            lon REAL,
-            capacity INTEGER
+def _validate_cloud_config():
+    missing = []
+    if not settings.aws_db_host:
+        missing.append("AWS_DB_HOST")
+    if not settings.aws_db_name:
+        missing.append("AWS_DB_NAME")
+    if not settings.aws_db_user:
+        missing.append("AWS_DB_USER")
+    if not settings.aws_db_password:
+        missing.append("AWS_DB_PASSWORD")
+
+    if missing:
+        raise ValueError(
+            "Cloud database mode requires these environment variables: " + ", ".join(missing)
         )
-    ''')
-    
-    # Create Status table to store real-time dynamic data (updated every 30s)
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS Status (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            station_id TEXT,
-            num_bikes_available INTEGER,
-            num_docks_available INTEGER,
-            grab_time INTEGER,
-            FOREIGN KEY (station_id) REFERENCES Station (station_id)
-        )
-    ''')
 
-    # Backward-compatible schema migration for existing local DB files.
-    c.execute("PRAGMA table_info(Status)")
-    existing_columns = {row[1] for row in c.fetchall()}
+
+def _build_database_url():
+    if settings.db_backend == "postgres":
+        _validate_cloud_config()
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=settings.aws_db_user,
+            password=settings.aws_db_password,
+            host=settings.aws_db_host,
+            port=settings.aws_db_port,
+            database=settings.aws_db_name,
+            query={"sslmode": settings.aws_db_sslmode},
+        )
+    return f"sqlite:///{settings.sqlite_db_path}"
+
+
+engine = create_engine(
+    _build_database_url(),
+    pool_pre_ping=True,
+    connect_args={"check_same_thread": False} if settings.db_backend == "sqlite" else {},
+)
+
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
+
+
+def get_session():
+    return SessionLocal()
+
+
+def _migrate_status_columns():
+    inspector = inspect(engine)
+    if "status" not in inspector.get_table_names():
+        return
+
+    existing_columns = {col["name"] for col in inspector.get_columns("status")}
     required_columns = {
         "is_installed": "INTEGER",
         "is_renting": "INTEGER",
@@ -48,9 +65,12 @@ def init_db():
         "num_docks_disabled": "INTEGER",
     }
 
-    for col_name, col_type in required_columns.items():
-        if col_name not in existing_columns:
-            c.execute(f"ALTER TABLE Status ADD COLUMN {col_name} {col_type}")
-    
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        for col_name, col_type in required_columns.items():
+            if col_name not in existing_columns:
+                conn.execute(text(f"ALTER TABLE status ADD COLUMN {col_name} {col_type}"))
+
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    _migrate_status_columns()

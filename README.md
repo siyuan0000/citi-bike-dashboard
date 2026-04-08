@@ -12,8 +12,29 @@ This application serves two main purposes:
    ```bash
    pip install -r requirements.txt
    ```
-2. Run the server locally:
+2. Configure environment (optional for local):
    ```bash
-   python application.py
+   # Local mode (default)
+   APP_ENV=local
+   DB_BACKEND=sqlite
+   SQLITE_DB_PATH=./citibike.db
+
+   # Cloud mode (AWS RDS Postgres)
+   APP_ENV=cloud
+   DB_BACKEND=postgres
+   AWS_DB_HOST=<your-rds-endpoint>
+   AWS_DB_PORT=5432
+   AWS_DB_NAME=<database_name>
+   AWS_DB_USER=<database_user>
+   AWS_DB_PASSWORD=<database_password>
+   AWS_DB_SSLMODE=require
    ```
-3. Visit `http://localhost:5000` in your web browser.
+3. Optional scheduler interval control:
+   ```bash
+   FETCH_INTERVAL_SECONDS=30
+   ```
+4. Run the server locally:
+   ```bash
+   python app.py
+   ```
+5. Visit `http://localhost:5000` in your web browser.

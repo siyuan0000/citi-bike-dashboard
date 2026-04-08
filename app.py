@@ -1,11 +1,16 @@
 from flask import Flask, render_template, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import func
 import fetcher
 import database
 import logging
 from datetime import datetime
+from config import settings, print_runtime_config
+from models import Station, Status
 
 app = Flask(__name__)
+
+print_runtime_config(mask_secrets=True)
 
 # Initialize Local SQLite database (Table Setup)
 database.init_db()
@@ -17,7 +22,11 @@ fetcher.fetch_and_store_static_info()
 logging.info("Starting background scheduler...")
 scheduler = BackgroundScheduler()
 # Executes the job function every 30 seconds mimicking real-time monitoring
-scheduler.add_job(func=fetcher.job_fetch_realtime_status, trigger="interval", seconds=30)
+scheduler.add_job(
+    func=fetcher.job_fetch_realtime_status,
+    trigger="interval",
+    seconds=settings.fetch_interval_seconds,
+)
 scheduler.start()
 
 # Manually trigger the first fetch right now!
@@ -32,69 +41,48 @@ def index():
 @app.route("/station/<station_id>")
 def station_detail(station_id):
     """ Detail Page showing Highcharts """
-    conn = database.get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT name, lat, lon, capacity FROM Station WHERE station_id = ?", (station_id,))
-    station_row = c.fetchone()
-    station_name = station_row["name"] if station_row else station_id
-    station_lat = station_row["lat"] if station_row else None
-    station_lon = station_row["lon"] if station_row else None
-    station_capacity = station_row["capacity"] if station_row else None
+    with database.get_session() as session:
+        station_row = session.get(Station, station_id)
+        latest_row = (
+            session.query(Status)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.id.desc())
+            .first()
+        )
+        rows = (
+            session.query(Status)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.grab_time.asc(), Status.id.asc())
+            .all()
+        )
 
-    c.execute(
-        """
-        SELECT
-            is_installed,
-            is_renting,
-            is_returning,
-            num_bikes_available,
-            num_docks_available,
-            num_bikes_disabled,
-            num_docks_disabled,
-            grab_time
-        FROM Status
-        WHERE station_id = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (station_id,),
-    )
-    latest_row = c.fetchone()
-
-    c.execute(
-        """
-        SELECT id, station_id, num_bikes_available, num_docks_available, grab_time
-        FROM Status
-        WHERE station_id = ?
-        ORDER BY grab_time ASC, id ASC
-        """,
-        (station_id,),
-    )
-    rows = c.fetchall()
-    conn.close()
+    station_name = station_row.name if station_row else station_id
+    station_lat = station_row.lat if station_row else None
+    station_lon = station_row.lon if station_row else None
+    station_capacity = station_row.capacity if station_row else None
 
     initial_debug_rows = []
     for row in rows:
         initial_debug_rows.append(
             {
-                "id": row["id"],
-                "station_id": row["station_id"],
-                "num_bikes_available": row["num_bikes_available"],
-                "num_docks_available": row["num_docks_available"],
-                "grab_time": row["grab_time"],
-                "local_time": datetime.fromtimestamp(row["grab_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "id": row.id,
+                "station_id": row.station_id,
+                "num_bikes_available": row.num_bikes_available,
+                "num_docks_available": row.num_docks_available,
+                "grab_time": row.grab_time,
+                "local_time": datetime.fromtimestamp(row.grab_time).strftime("%Y-%m-%d %H:%M:%S"),
             }
         )
 
     initial_latest_status = {
-        "is_installed": bool(latest_row["is_installed"]) if latest_row and latest_row["is_installed"] is not None else None,
-        "is_renting": bool(latest_row["is_renting"]) if latest_row and latest_row["is_renting"] is not None else None,
-        "is_returning": bool(latest_row["is_returning"]) if latest_row and latest_row["is_returning"] is not None else None,
-        "num_bikes_available": latest_row["num_bikes_available"] if latest_row else None,
-        "num_docks_available": latest_row["num_docks_available"] if latest_row else None,
-        "num_vehicles_disabled": latest_row["num_bikes_disabled"] if latest_row else None,
-        "num_docks_disabled": latest_row["num_docks_disabled"] if latest_row else None,
-        "latest_grab_time": latest_row["grab_time"] if latest_row else None,
+        "is_installed": bool(latest_row.is_installed) if latest_row and latest_row.is_installed is not None else None,
+        "is_renting": bool(latest_row.is_renting) if latest_row and latest_row.is_renting is not None else None,
+        "is_returning": bool(latest_row.is_returning) if latest_row and latest_row.is_returning is not None else None,
+        "num_bikes_available": latest_row.num_bikes_available if latest_row else None,
+        "num_docks_available": latest_row.num_docks_available if latest_row else None,
+        "num_vehicles_disabled": latest_row.num_bikes_disabled if latest_row else None,
+        "num_docks_disabled": latest_row.num_docks_disabled if latest_row else None,
+        "latest_grab_time": latest_row.grab_time if latest_row else None,
     }
 
     return render_template(
@@ -114,143 +102,78 @@ def get_map_stations():
     API endpoint returning station static info + latest station status.
     This allows map markers to show both location and real-time availability.
     """
-    conn = database.get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT
-            s.station_id,
-            s.name,
-            s.lat,
-            s.lon,
-            s.capacity,
-            st.num_bikes_available,
-            st.num_docks_available,
-            st.is_installed,
-            st.is_renting,
-            st.is_returning,
-            st.num_bikes_disabled,
-            st.num_docks_disabled,
-            st.grab_time
-        FROM Station s
-        LEFT JOIN (
-            SELECT
-                cur.station_id,
-                cur.num_bikes_available,
-                cur.num_docks_available,
-                cur.is_installed,
-                cur.is_renting,
-                cur.is_returning,
-                cur.num_bikes_disabled,
-                cur.num_docks_disabled,
-                cur.grab_time
-            FROM Status cur
-            INNER JOIN (
-                SELECT station_id, MAX(id) AS latest_id
-                FROM Status
-                GROUP BY station_id
-            ) latest
-                ON cur.station_id = latest.station_id
-                AND cur.id = latest.latest_id
-        ) st
-            ON s.station_id = st.station_id
-        ORDER BY s.name ASC
-        """
-    )
-    rows = c.fetchall()
+    with database.get_session() as session:
+        latest_subquery = (
+            session.query(Status.station_id, func.max(Status.id).label("latest_id"))
+            .group_by(Status.station_id)
+            .subquery()
+        )
+
+        rows = (
+            session.query(Station, Status)
+            .outerjoin(latest_subquery, Station.station_id == latest_subquery.c.station_id)
+            .outerjoin(Status, Status.id == latest_subquery.c.latest_id)
+            .order_by(Station.name.asc())
+            .all()
+        )
     
     stations = []
-    for row in rows:
-        is_installed = bool(row["is_installed"]) if row["is_installed"] is not None else None
-        is_renting = bool(row["is_renting"]) if row["is_renting"] is not None else None
-        is_returning = bool(row["is_returning"]) if row["is_returning"] is not None else None
+    for station, status in rows:
+        is_installed = bool(status.is_installed) if status and status.is_installed is not None else None
+        is_renting = bool(status.is_renting) if status and status.is_renting is not None else None
+        is_returning = bool(status.is_returning) if status and status.is_returning is not None else None
 
         stations.append({
-            "station_id": row["station_id"],
-            "name": row["name"],
-            "lat": row["lat"],
-            "lon": row["lon"],
-            "capacity": row["capacity"],
+            "station_id": station.station_id,
+            "name": station.name,
+            "lat": station.lat,
+            "lon": station.lon,
+            "capacity": station.capacity,
             "is_installed": is_installed,
             "is_renting": is_renting,
             "is_returning": is_returning,
-            "num_bikes_available": row["num_bikes_available"],
-            "num_docks_available": row["num_docks_available"],
-            "num_vehicles_disabled": row["num_bikes_disabled"],
-            "num_bikes_disabled": row["num_bikes_disabled"],
-            "num_docks_disabled": row["num_docks_disabled"],
-            "latest_grab_time": row["grab_time"],
-            "latest_grab_time_ms": row["grab_time"] * 1000 if row["grab_time"] is not None else None,
+            "num_bikes_available": status.num_bikes_available if status else None,
+            "num_docks_available": status.num_docks_available if status else None,
+            "num_vehicles_disabled": status.num_bikes_disabled if status else None,
+            "num_bikes_disabled": status.num_bikes_disabled if status else None,
+            "num_docks_disabled": status.num_docks_disabled if status else None,
+            "latest_grab_time": status.grab_time if status else None,
+            "latest_grab_time_ms": status.grab_time * 1000 if status and status.grab_time is not None else None,
         })
-        
-    conn.close()
+
     return jsonify(stations)
 
 
 @app.route("/api/station_latest/<station_id>")
 def get_station_latest(station_id):
     """Returns static station info with the newest status row for one station."""
-    conn = database.get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT
-            s.station_id,
-            s.name,
-            s.lat,
-            s.lon,
-            s.capacity,
-            st.num_bikes_available,
-            st.num_docks_available,
-            st.is_installed,
-            st.is_renting,
-            st.is_returning,
-            st.num_bikes_disabled,
-            st.num_docks_disabled,
-            st.grab_time
-        FROM Station s
-        LEFT JOIN (
-            SELECT
-                station_id,
-                num_bikes_available,
-                num_docks_available,
-                is_installed,
-                is_renting,
-                is_returning,
-                num_bikes_disabled,
-                num_docks_disabled,
-                grab_time
-            FROM Status
-            WHERE station_id = ?
-            ORDER BY id DESC
-            LIMIT 1
-        ) st
-            ON s.station_id = st.station_id
-        WHERE s.station_id = ?
-        """,
-        (station_id, station_id),
-    )
-    row = c.fetchone()
-    conn.close()
+    with database.get_session() as session:
+        station = session.get(Station, station_id)
+        latest_status = (
+            session.query(Status)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.id.desc())
+            .first()
+        )
 
-    if not row:
+    if not station:
         return jsonify({"error": "Station not found"}), 404
 
     payload = {
-        "station_id": row["station_id"],
-        "name": row["name"],
-        "lat": row["lat"],
-        "lon": row["lon"],
-        "capacity": row["capacity"],
-        "is_installed": bool(row["is_installed"]) if row["is_installed"] is not None else None,
-        "is_renting": bool(row["is_renting"]) if row["is_renting"] is not None else None,
-        "is_returning": bool(row["is_returning"]) if row["is_returning"] is not None else None,
-        "num_bikes_available": row["num_bikes_available"],
-        "num_docks_available": row["num_docks_available"],
-        "num_vehicles_disabled": row["num_bikes_disabled"],
-        "num_docks_disabled": row["num_docks_disabled"],
-        "latest_grab_time": row["grab_time"],
-        "latest_grab_time_ms": row["grab_time"] * 1000 if row["grab_time"] is not None else None,
+        "station_id": station.station_id,
+        "name": station.name,
+        "lat": station.lat,
+        "lon": station.lon,
+        "capacity": station.capacity,
+        "is_installed": bool(latest_status.is_installed) if latest_status and latest_status.is_installed is not None else None,
+        "is_renting": bool(latest_status.is_renting) if latest_status and latest_status.is_renting is not None else None,
+        "is_returning": bool(latest_status.is_returning) if latest_status and latest_status.is_returning is not None else None,
+        "num_bikes_available": latest_status.num_bikes_available if latest_status else None,
+        "num_docks_available": latest_status.num_docks_available if latest_status else None,
+        "num_vehicles_disabled": latest_status.num_bikes_disabled if latest_status else None,
+        "num_docks_disabled": latest_status.num_docks_disabled if latest_status else None,
+        "latest_grab_time": latest_status.grab_time if latest_status else None,
+        "latest_grab_time_ms": latest_status.grab_time * 1000 if latest_status and latest_status.grab_time is not None else None,
     }
     return jsonify(payload)
 
@@ -261,21 +184,18 @@ def get_station_data(station_id):
     Accepts an optional URL param `last_time` to fetch only NEW records.
     """
     last_time = request.args.get('last_time', 0, type=int)
-    conn = database.get_db_connection()
-    c = conn.cursor()
-    
-    if last_time > 0:
-         # Mimic logic seen in Lab06: fetch updates
-         c.execute("SELECT grab_time, num_bikes_available FROM Status WHERE station_id = ? AND grab_time > ? ORDER BY grab_time ASC", (station_id, last_time))
-    else:
-         # Initial load: grab entire available history
-         c.execute("SELECT grab_time, num_bikes_available FROM Status WHERE station_id = ? ORDER BY grab_time ASC", (station_id,))
-         
-    rows = c.fetchall()
-    conn.close()
+    with database.get_session() as session:
+        query = (
+            session.query(Status.grab_time, Status.num_bikes_available)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.grab_time.asc())
+        )
+        if last_time > 0:
+            query = query.filter(Status.grab_time > last_time)
+        rows = query.all()
     
     # Highcharts requires timestamp in milliseconds
-    data = [[row["grab_time"] * 1000, row["num_bikes_available"]] for row in rows]
+    data = [[row.grab_time * 1000, row.num_bikes_available] for row in rows]
     
     return jsonify(data)
 
@@ -286,53 +206,40 @@ def get_station_docks_data(station_id):
     Accepts an optional URL param `last_time` to fetch only NEW records.
     """
     last_time = request.args.get('last_time', 0, type=int)
-    conn = database.get_db_connection()
-    c = conn.cursor()
-
-    if last_time > 0:
-        c.execute(
-            "SELECT grab_time, num_docks_available FROM Status WHERE station_id = ? AND grab_time > ? ORDER BY grab_time ASC",
-            (station_id, last_time),
+    with database.get_session() as session:
+        query = (
+            session.query(Status.grab_time, Status.num_docks_available)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.grab_time.asc())
         )
-    else:
-        c.execute(
-            "SELECT grab_time, num_docks_available FROM Status WHERE station_id = ? ORDER BY grab_time ASC",
-            (station_id,),
-        )
+        if last_time > 0:
+            query = query.filter(Status.grab_time > last_time)
+        rows = query.all()
 
-    rows = c.fetchall()
-    conn.close()
-
-    data = [[row["grab_time"] * 1000, row["num_docks_available"]] for row in rows]
+    data = [[row.grab_time * 1000, row.num_docks_available] for row in rows]
     return jsonify(data)
 
 @app.route("/api/debug/<station_id>")
 def get_station_debug_data(station_id):
     """Returns full raw rows for debugging front-end chart issues."""
-    conn = database.get_db_connection()
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT id, station_id, num_bikes_available, num_docks_available, grab_time
-        FROM Status
-        WHERE station_id = ?
-        ORDER BY grab_time ASC, id ASC
-        """,
-        (station_id,),
-    )
-    rows = c.fetchall()
-    conn.close()
+    with database.get_session() as session:
+        rows = (
+            session.query(Status)
+            .filter(Status.station_id == station_id)
+            .order_by(Status.grab_time.asc(), Status.id.asc())
+            .all()
+        )
 
     debug_rows = []
     for row in rows:
         debug_rows.append(
             {
-                "id": row["id"],
-                "station_id": row["station_id"],
-                "num_bikes_available": row["num_bikes_available"],
-                "num_docks_available": row["num_docks_available"],
-                "grab_time": row["grab_time"],
-                "grab_time_ms": row["grab_time"] * 1000,
+                "id": row.id,
+                "station_id": row.station_id,
+                "num_bikes_available": row.num_bikes_available,
+                "num_docks_available": row.num_docks_available,
+                "grab_time": row.grab_time,
+                "grab_time_ms": row.grab_time * 1000,
             }
         )
 

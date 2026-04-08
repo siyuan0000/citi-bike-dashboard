@@ -1,7 +1,8 @@
 import time
 import requests
 import logging
-from database import get_db_connection
+from database import get_session
+from models import Station, Status
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,32 +25,36 @@ TARGET_STATIONS = [
 
 def fetch_and_store_static_info():
     """ Runs once when app starts to load our 10 selected stations """
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM Station")
-    count = c.fetchone()[0]
-    
-    # Only insert if no stations exist
-    if count < len(TARGET_STATIONS):
-        logging.info("Initializing static data for fixed 10 stations...")
-        try:
-            response = requests.get(INFO_API_URL)
-            stations = response.json()["data"]["stations"]
-            
-            for station in stations:
-                if station["station_id"] in TARGET_STATIONS:
-                    c.execute(
-                        "INSERT OR IGNORE INTO Station (station_id, name, lat, lon, capacity) VALUES (?, ?, ?, ?, ?)",
-                        (station["station_id"], station["name"], station["lat"], station["lon"], station["capacity"])
-                    )
-                    
-            conn.commit()
-            logging.info("Successfully fetched and inserted the 10 fixed stations.")
-        except Exception as e:
-            logging.error(f"Failed to fetch static data: {e}")
-    else:
-        logging.info("Fixed stations already loaded in DB.")
-    conn.close()
+    with get_session() as session:
+        count = session.query(Station).count()
+
+        # Only insert if no stations exist
+        if count < len(TARGET_STATIONS):
+            logging.info("Initializing static data for fixed 10 stations...")
+            try:
+                response = requests.get(INFO_API_URL, timeout=10)
+                stations = response.json()["data"]["stations"]
+
+                for station in stations:
+                    if station["station_id"] in TARGET_STATIONS:
+                        # merge handles insert/update safely across backends.
+                        session.merge(
+                            Station(
+                                station_id=station["station_id"],
+                                name=station["name"],
+                                lat=station["lat"],
+                                lon=station["lon"],
+                                capacity=station["capacity"],
+                            )
+                        )
+
+                session.commit()
+                logging.info("Successfully fetched and inserted the 10 fixed stations.")
+            except Exception as e:
+                session.rollback()
+                logging.error(f"Failed to fetch static data: {e}")
+        else:
+            logging.info("Fixed stations already loaded in DB.")
 
 def job_fetch_realtime_status():
     """ 
@@ -65,44 +70,27 @@ def job_fetch_realtime_status():
         # points on the chart every 30 seconds, even if the Citi Bike API delays its update.
         actual_time = int(time.time())
         
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        inserted_count = 0
-        for station in stations:
-            # Only care about our 20 selected stations
-            if station["station_id"] in TARGET_STATIONS:
-                c.execute(
-                    """
-                    INSERT INTO Status (
-                        station_id,
-                        num_bikes_available,
-                        num_docks_available,
-                        is_installed,
-                        is_renting,
-                        is_returning,
-                        num_bikes_disabled,
-                        num_docks_disabled,
-                        grab_time
+        with get_session() as session:
+            inserted_count = 0
+            for station in stations:
+                # Only care about our 10 selected stations
+                if station["station_id"] in TARGET_STATIONS:
+                    session.add(
+                        Status(
+                            station_id=station["station_id"],
+                            num_bikes_available=station["num_bikes_available"],
+                            num_docks_available=station["num_docks_available"],
+                            is_installed=int(station.get("is_installed", 0)),
+                            is_renting=int(station.get("is_renting", 0)),
+                            is_returning=int(station.get("is_returning", 0)),
+                            num_bikes_disabled=int(station.get("num_bikes_disabled", 0)),
+                            num_docks_disabled=int(station.get("num_docks_disabled", 0)),
+                            grab_time=actual_time,
+                        )
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        station["station_id"],
-                        station["num_bikes_available"],
-                        station["num_docks_available"],
-                        int(station.get("is_installed", 0)),
-                        int(station.get("is_renting", 0)),
-                        int(station.get("is_returning", 0)),
-                        int(station.get("num_bikes_disabled", 0)),
-                        int(station.get("num_docks_disabled", 0)),
-                        actual_time,
-                    )
-                )
-                inserted_count += 1
-                
-        conn.commit()
-        conn.close()
+                    inserted_count += 1
+
+            session.commit()
         
         logging.info(f"Background task executed: fetched and saved {inserted_count} real-time records at {actual_time}")
     except Exception as e:
