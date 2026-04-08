@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Citi Bike Real-Time Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; background-color: #0b3d91; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .nav a { color: white; text-decoration: none; margin-left: 15px; font-weight: bold; background-color: #1e62c9; padding: 10px; border-radius: 4px; }
+        .nav a:hover { background-color: #2779f5; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 4px solid #0b3d91; }
+        .card h3 { margin-top: 0; color: #0b3d91; font-size: 1.1em; }
+        .badge { display: inline-block; padding: 5px 10px; border-radius: 12px; font-size: 0.85em; font-weight: bold; color: white; }
+        .badge-available { background-color: #28a745; }
+        .badge-empty { background-color: #dc3545; }
+        .loading { font-size: 1.2em; text-align: center; margin-top: 50px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Citi Bike Real-Time Status</h1>
+            <div class="nav">
+                <a href="/">Real-Time Data</a>
+                <a href="/history">History Analytics</a>
+            </div>
+        </header>
+        
+        <div id="loading" class="loading">Loading Live Data...</div>
+        <div id="stations-grid" class="grid"></div>
+    </div>
+
+    <script>
+        async function fetchStations() {
+            try {
+                const response = await fetch('/api/stations');
+                const result = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                if (result.status === 'success') {
+                    const grid = document.getElementById('stations-grid');
+                    grid.innerHTML = ''; // Clear existing
+                    
+                    // Displaying the first 20 stations for demo purposes
+                    const stations = result.data.slice(0, 20);
+                    
+                    stations.forEach(station => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        
+                        const bikesAvailable = station.num_bikes_available;
+                        const badgeClass = bikesAvailable > 0 ? 'badge-available' : 'badge-empty';
+                        
+                        card.innerHTML = `
+                            <h3>${station.name}</h3>
+                            <p><strong>Capacity:</strong> ${station.capacity}</p>
+                            <p><strong>Bikes Available:</strong> <span class="badge ${badgeClass}">${bikesAvailable}</span></p>
+                            <p><strong>Docks Available:</strong> ${station.num_docks_available}</p>
+                        `;
+                        grid.appendChild(card);
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching station data:", error);
+                document.getElementById('loading').innerText = "Error loading data.";
+            }
+        }
+
+        // Fetch immediately and poll every 30 seconds
+        fetchStations();
+        setInterval(fetchStations, 30000);
+    </script>
+</body>
+</html>
