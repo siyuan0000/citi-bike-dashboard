@@ -10,6 +10,8 @@ export MYSQL_DB_NAME="comp4442_project"
 export MYSQL_DB_USER="admin"
 export MYSQL_DB_PASSWORD="12345678"
 
+# export SPARK_OUTPUT_S3_URI="s3://citi-bike-dashboard/spark_output/"
+
 # Optional: controls scheduler polling interval (seconds)
 export FETCH_INTERVAL_SECONDS="30"
 

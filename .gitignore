@@ -5,3 +5,8 @@ __pycache__/
 .DS_Store
 # *.db
 .vscode/settings.json
+
+**SUCCESS**
+**_SUCCESS**
+
+histroydata/*

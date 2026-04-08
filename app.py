@@ -4,11 +4,140 @@ from sqlalchemy import func
 import fetcher
 import database
 import logging
+import os
+import glob
+import csv
+import io
+from urllib.parse import urlparse
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from datetime import datetime
 from config import settings, print_runtime_config
 from models import Station, Status
 
 app = Flask(__name__)
+
+SPARK_OUTPUT_DIR_CANDIDATES = [
+    "spark_output_local",
+    "spark_output",
+]
+
+SPARK_OUTPUT_S3_URI = os.getenv("SPARK_OUTPUT_S3_URI", "").strip()
+
+SPARK_OUTPUT_TABLES = [
+    "overview",
+    "duration_stats",
+    "rides_by_member_type",
+    "rides_by_rideable_type",
+    "top_start_stations",
+    "top_end_stations",
+    "hourly_distribution",
+    "data_quality",
+]
+
+
+def _workspace_path(*parts):
+    return os.path.join(os.path.dirname(__file__), *parts)
+
+
+def _parse_s3_uri(s3_uri):
+    parsed = urlparse(s3_uri)
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise ValueError(f"Invalid S3 URI: {s3_uri}")
+    return parsed.netloc, parsed.path.lstrip("/")
+
+
+def _pick_spark_output_dir():
+    existing = []
+    for candidate in SPARK_OUTPUT_DIR_CANDIDATES:
+        full_path = _workspace_path(candidate)
+        if os.path.isdir(full_path):
+            existing.append(full_path)
+
+    if not existing:
+        return None
+
+    return max(existing, key=os.path.getmtime)
+
+
+def _read_first_csv_rows(folder_path):
+    csv_files = sorted(glob.glob(os.path.join(folder_path, "*.csv")))
+    if not csv_files:
+        return []
+
+    with open(csv_files[0], "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        return [dict(row) for row in reader]
+
+
+def _read_first_csv_rows_from_s3(s3_client, base_s3_uri, table_name):
+    bucket, prefix = _parse_s3_uri(base_s3_uri)
+    table_prefix = "/".join(p for p in [prefix.rstrip("/"), table_name] if p).rstrip("/") + "/"
+
+    paginator = s3_client.get_paginator("list_objects_v2")
+    candidate_keys = []
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=table_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith(".csv"):
+                candidate_keys.append(key)
+
+    if not candidate_keys:
+        return []
+
+    candidate_keys.sort()
+    response = s3_client.get_object(Bucket=bucket, Key=candidate_keys[0])
+    content = response["Body"].read().decode("utf-8")
+    reader = csv.DictReader(io.StringIO(content))
+    return [dict(row) for row in reader]
+
+
+def _load_spark_analysis_payload_from_s3(s3_uri):
+    s3_client = boto3.client("s3")
+    tables = {}
+    for table_name in SPARK_OUTPUT_TABLES:
+        tables[table_name] = _read_first_csv_rows_from_s3(s3_client, s3_uri, table_name)
+
+    return {
+        "available": True,
+        "message": "Spark analysis loaded successfully from S3.",
+        "output_dir": s3_uri,
+        "tables": tables,
+    }
+
+
+def _load_spark_analysis_payload():
+    if SPARK_OUTPUT_S3_URI:
+        try:
+            return _load_spark_analysis_payload_from_s3(SPARK_OUTPUT_S3_URI)
+        except (ValueError, BotoCoreError, ClientError) as exc:
+            logging.warning("Unable to load Spark output from S3 (%s): %s", SPARK_OUTPUT_S3_URI, exc)
+
+    output_dir = _pick_spark_output_dir()
+    if not output_dir:
+        return {
+            "available": False,
+            "message": "No Spark output found. Set SPARK_OUTPUT_S3_URI or run spark_analysis.py locally first.",
+            "output_dir": None,
+            "tables": {},
+        }
+
+    tables = {}
+    for table_name in SPARK_OUTPUT_TABLES:
+        folder = os.path.join(output_dir, table_name)
+        if os.path.isdir(folder):
+            tables[table_name] = _read_first_csv_rows(folder)
+        else:
+            tables[table_name] = []
+
+    return {
+        "available": True,
+        "message": "Spark analysis loaded successfully.",
+        "output_dir": os.path.basename(output_dir),
+        "tables": tables,
+    }
 
 print_runtime_config(mask_secrets=True)
 
@@ -37,6 +166,17 @@ fetcher.job_fetch_realtime_status()
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/history")
+def history():
+    return render_template("history.html")
+
+
+@app.route("/api/history-data")
+def get_history_data():
+    payload = _load_spark_analysis_payload()
+    return jsonify(payload)
 
 @app.route("/station/<station_id>")
 def station_detail(station_id):
