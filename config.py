@@ -11,12 +11,11 @@ class Settings:
     app_env: str
     db_backend: str
     sqlite_db_path: str
-    aws_db_host: str
-    aws_db_port: int
-    aws_db_name: str
-    aws_db_user: str
-    aws_db_password: str
-    aws_db_sslmode: str
+    mysql_db_host: str
+    mysql_db_port: int
+    mysql_db_name: str
+    mysql_db_user: str
+    mysql_db_password: str
     fetch_interval_seconds: int
 
 
@@ -32,7 +31,7 @@ def _load_settings() -> Settings:
 
     # Default backend behavior is controlled by APP_ENV.
     if not db_backend:
-        db_backend = "postgres" if app_env == "cloud" else "sqlite"
+        db_backend = "mysql" if app_env == "cloud" else "sqlite"
 
     sqlite_db_path = os.getenv("SQLITE_DB_PATH", str(BASE_DIR / "citibike.db"))
 
@@ -40,12 +39,11 @@ def _load_settings() -> Settings:
         app_env=app_env,
         db_backend=db_backend,
         sqlite_db_path=sqlite_db_path,
-        aws_db_host=os.getenv("AWS_DB_HOST", ""),
-        aws_db_port=int(os.getenv("AWS_DB_PORT", "5432")),
-        aws_db_name=os.getenv("AWS_DB_NAME", ""),
-        aws_db_user=os.getenv("AWS_DB_USER", ""),
-        aws_db_password=os.getenv("AWS_DB_PASSWORD", ""),
-        aws_db_sslmode=os.getenv("AWS_DB_SSLMODE", "require"),
+        mysql_db_host=os.getenv("MYSQL_DB_HOST", ""),
+        mysql_db_port=int(os.getenv("MYSQL_DB_PORT", "3306")),
+        mysql_db_name=os.getenv("MYSQL_DB_NAME", ""),
+        mysql_db_user=os.getenv("MYSQL_DB_USER", ""),
+        mysql_db_password=os.getenv("MYSQL_DB_PASSWORD", ""),
         fetch_interval_seconds=int(os.getenv("FETCH_INTERVAL_SECONDS", "30")),
     )
 
@@ -58,17 +56,16 @@ def as_dict(mask_secrets=True):
         "app_env": settings.app_env,
         "db_backend": settings.db_backend,
         "sqlite_db_path": settings.sqlite_db_path,
-        "aws_db_host": settings.aws_db_host,
-        "aws_db_port": settings.aws_db_port,
-        "aws_db_name": settings.aws_db_name,
-        "aws_db_user": settings.aws_db_user,
-        "aws_db_password": settings.aws_db_password,
-        "aws_db_sslmode": settings.aws_db_sslmode,
+        "mysql_db_host": settings.mysql_db_host,
+        "mysql_db_port": settings.mysql_db_port,
+        "mysql_db_name": settings.mysql_db_name,
+        "mysql_db_user": settings.mysql_db_user,
+        "mysql_db_password": settings.mysql_db_password,
         "fetch_interval_seconds": settings.fetch_interval_seconds,
     }
 
-    if mask_secrets and config_map["aws_db_password"]:
-        config_map["aws_db_password"] = "***"
+    if mask_secrets and config_map["mysql_db_password"]:
+        config_map["mysql_db_password"] = "***"
 
     return config_map
 
@@ -84,4 +81,4 @@ def print_runtime_config(mask_secrets=True):
 
 
 def using_cloud_database() -> bool:
-    return settings.db_backend == "postgres"
+    return settings.db_backend == "mysql"

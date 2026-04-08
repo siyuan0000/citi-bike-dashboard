@@ -7,8 +7,8 @@ Base = declarative_base()
 class Station(Base):
     __tablename__ = "station"
 
-    station_id = Column(String, primary_key=True)
-    name = Column(String)
+    station_id = Column(String(64), primary_key=True)
+    name = Column(String(255))
     lat = Column(Float)
     lon = Column(Float)
     capacity = Column(Integer)
@@ -20,7 +20,7 @@ class Status(Base):
     __tablename__ = "status"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    station_id = Column(String, ForeignKey("station.station_id"), index=True)
+    station_id = Column(String(64), ForeignKey("station.station_id"), index=True)
     num_bikes_available = Column(Integer)
     num_docks_available = Column(Integer)
     grab_time = Column(Integer, index=True)

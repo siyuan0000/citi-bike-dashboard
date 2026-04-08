@@ -8,14 +8,14 @@ from models import Base
 
 def _validate_cloud_config():
     missing = []
-    if not settings.aws_db_host:
-        missing.append("AWS_DB_HOST")
-    if not settings.aws_db_name:
-        missing.append("AWS_DB_NAME")
-    if not settings.aws_db_user:
-        missing.append("AWS_DB_USER")
-    if not settings.aws_db_password:
-        missing.append("AWS_DB_PASSWORD")
+    if not settings.mysql_db_host:
+        missing.append("MYSQL_DB_HOST")
+    if not settings.mysql_db_name:
+        missing.append("MYSQL_DB_NAME")
+    if not settings.mysql_db_user:
+        missing.append("MYSQL_DB_USER")
+    if not settings.mysql_db_password:
+        missing.append("MYSQL_DB_PASSWORD")
 
     if missing:
         raise ValueError(
@@ -24,16 +24,15 @@ def _validate_cloud_config():
 
 
 def _build_database_url():
-    if settings.db_backend == "postgres":
+    if settings.db_backend == "mysql":
         _validate_cloud_config()
         return URL.create(
-            drivername="postgresql+psycopg",
-            username=settings.aws_db_user,
-            password=settings.aws_db_password,
-            host=settings.aws_db_host,
-            port=settings.aws_db_port,
-            database=settings.aws_db_name,
-            query={"sslmode": settings.aws_db_sslmode},
+            drivername="mysql+pymysql",
+            username=settings.mysql_db_user,
+            password=settings.mysql_db_password,
+            host=settings.mysql_db_host,
+            port=settings.mysql_db_port,
+            database=settings.mysql_db_name,
         )
     return f"sqlite:///{settings.sqlite_db_path}"
 
