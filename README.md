@@ -32,3 +32,9 @@ To run the server with AWS RDS (MySQL) and S3 integration, define your environme
 ```bash
 bash startCloud.bash
 ```
+
+## Roadmap to Full Cloud Architecture
+While the local development workflows are fully implemented, the following cloud-native integrations from the architecture diagram are pending:
+- [ ] **AWS Elastic Beanstalk & RDS Deployment**: Provision and deploy the Flask application to Elastic Beanstalk, substituting local SQLite with a production AWS RDS MySQL instance.
+- [ ] **PySpark on AWS EMR**: Launch the `spark_analysis.py` pipeline natively on an AWS EMR cluster to process the massive raw trip CSVs directly from an originating S3 bucket.
+- [ ] **S3 Data Sink Integration**: Finalize and test the backend's `boto3` logic to ensure the `History Analytics Dashboard` streams its tabular data directly from the aggregated AWS S3 output sink.
