@@ -16,7 +16,7 @@ from datetime import datetime
 from config import settings, print_runtime_config
 from models import Station, Status
 
-app = Flask(__name__)
+application = Flask(__name__)
 
 SPARK_OUTPUT_DIR_CANDIDATES = [
     "spark_output_local",
@@ -163,22 +163,22 @@ scheduler.start()
 # preventing empty charts if a user clicks right away.
 fetcher.job_fetch_realtime_status()
 
-@app.route("/")
+@appapplication.route("/")
 def index():
     return render_template("index.html")
 
 
-@app.route("/history")
+@application.route("/history")
 def history():
     return render_template("history.html")
 
 
-@app.route("/api/history-data")
+@application.route("/api/history-data")
 def get_history_data():
     payload = _load_spark_analysis_payload()
     return jsonify(payload)
 
-@app.route("/station/<station_id>")
+@application.route("/station/<station_id>")
 def station_detail(station_id):
     """ Detail Page showing Highcharts """
     with database.get_session() as session:
@@ -236,7 +236,7 @@ def station_detail(station_id):
         initial_debug_rows=initial_debug_rows,
     )
 
-@app.route("/api/stations")
+@application.route("/api/stations")
 def get_map_stations():
     """ 
     API endpoint returning station static info + latest station status.
@@ -284,7 +284,7 @@ def get_map_stations():
     return jsonify(stations)
 
 
-@app.route("/api/station_latest/<station_id>")
+@application.route("/api/station_latest/<station_id>")
 def get_station_latest(station_id):
     """Returns static station info with the newest status row for one station."""
     with database.get_session() as session:
@@ -317,7 +317,7 @@ def get_station_latest(station_id):
     }
     return jsonify(payload)
 
-@app.route("/api/data/<station_id>")
+@application.route("/api/data/<station_id>")
 def get_station_data(station_id):
     """ 
     Returns time-series data for a specific station.
@@ -339,7 +339,7 @@ def get_station_data(station_id):
     
     return jsonify(data)
 
-@app.route("/api/data_docks/<station_id>")
+@application.route("/api/data_docks/<station_id>")
 def get_station_docks_data(station_id):
     """
     Returns available docks time-series for a specific station.
@@ -359,7 +359,7 @@ def get_station_docks_data(station_id):
     data = [[row.grab_time * 1000, row.num_docks_available] for row in rows]
     return jsonify(data)
 
-@app.route("/api/debug/<station_id>")
+@application.route("/api/debug/<station_id>")
 def get_station_debug_data(station_id):
     """Returns full raw rows for debugging front-end chart issues."""
     with database.get_session() as session:
@@ -388,7 +388,7 @@ def get_station_debug_data(station_id):
 if __name__ == "__main__":
     # Ensure background thread is killed properly on exit
     try:
-        app.run(port=5000, debug=False, use_reloader=False) 
+        application.run(port=5000, debug=False, use_reloader=False) 
         # use_reloader=False prevents double execution of our 30 second scheduler
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
